@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Update & Rekonsiliasi Master Data Harga (Real-Time Cloud Database)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- SheetJS (xlsx) for Excel parsing/download -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- jsPDF & autoTable for Direct PDF Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        [x-cloak] { display: none !important; }
+        .custom-scrollbar::-webkit-scrollbar { height: 8px; width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        @media print {
+            body * { visibility: hidden; }
+            #printableProposalModal, #printableProposalModal * { visibility: visible; }
+            #printableProposalModal {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                background: white !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                box-shadow: none !important;
+            }
+            .no-print { display: none !important; }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen" x-data="dashboardApp()" x-init="initApp()">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm no-print">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center space-x-3 w-full md:w-auto justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="p-2 bg-blue-600 text-white rounded-lg shadow-sm">
+                        <i data-lucide="wifi" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <h1 class="text-xl font-bold text-slate-900">Dashboard Rekon Harga</h1>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                <span class="w-2 h-2 mr-1 rounded-full bg-emerald-500 animate-ping"></span> Realtime Sync Active
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-500">Master Data Cloud Database Reconciliation & Proposal Engine</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+                <button @click="openProposalModal = true" class="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm">
+                    <i data-lucide="file-text" class="w-4 h-4"></i>
+                    <span>Cetak / Export PDF Proposal (<span x-text="proposalCart.length"></span>)</span>
+                </button>
+
+                <button @click="openAddModal = true" class="inline-flex items-center space-x-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition-colors shadow-sm">
+                    <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                    <span>+ Item Baru</span>
+                </button>
+                
+                <button @click="exportMasterExcel()" class="inline-flex items-center space-x-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors shadow-sm">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                    <span>Ekspor Master (.xlsx)</span>
+                </button>
+
+                <button @click="exportHistoryLog()" class="inline-flex items-center space-x-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-medium rounded-lg transition-colors shadow-sm">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    <span>Log History (.xlsx)</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 no-print">
+
+        <!-- Real-Time Collaboration & Database Status Banner -->
+        <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-xl p-4 text-white shadow-md flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="p-2.5 bg-indigo-500/20 rounded-lg border border-indigo-400/30">
+                    <i data-lucide="database" class="w-5 h-5 text-indigo-300"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-bold flex items-center gap-2">
+                        <span>Database Terpusat Real-Time Aktif</span>
+                        <span class="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono" x-text="syncStatus"></span>
+                    </h3>
+                    <p class="text-xs text-slate-300 mt-0.5">Semua perubahan harga yang Anda simpan langsung tersimpan di Cloud Database & otomatis memperbarui layar seluruh pengguna.</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-2 bg-white/10 px-3 py-1.5 rounded-lg border border-white/10 text-xs w-full md:w-auto justify-between">
+                <button @click="openCloudConfigModal = true" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold rounded text-[11px] transition flex items-center space-x-1">
+                    <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+                    <span>Set Kunci Firebase Custom</span>
+                </button>
+                <button @click="copyShareLink()" class="px-2.5 py-1 bg-indigo-500 hover:bg-indigo-600 text-white font-medium rounded text-[11px] transition flex items-center space-x-1">
+                    <i data-lucide="copy" class="w-3 h-3"></i>
+                    <span>Salin Link Sesi</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Top Summary Metrics Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Item Barang</p>
+                    <p class="text-2xl font-bold text-slate-900 mt-1" x-text="items.length"></p>
+                </div>
+                <div class="p-3 bg-blue-50 text-blue-600 rounded-lg">
+                    <i data-lucide="box" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Item Di Proposal</p>
+                    <p class="text-2xl font-bold text-indigo-600 mt-1" x-text="proposalCart.length"></p>
+                </div>
+                <div class="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
+                    <i data-lucide="file-check" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Audit Log</p>
+                    <p class="text-2xl font-bold text-slate-900 mt-1" x-text="historyLogs.length"></p>
+                </div>
+                <div class="p-3 bg-amber-50 text-amber-600 rounded-lg">
+                    <i data-lucide="history" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Koneksi Database</p>
+                    <div class="flex items-center space-x-1.5 mt-1">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <p class="text-sm font-bold text-emerald-600">Cloud Live Database</p>
+                    </div>
+                </div>
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
+                    <i data-lucide="cloud" class="w-6 h-6"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Update Harga Form & Upload Excel -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Update Form -->
+            <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+                <h2 class="text-lg font-bold text-slate-900 mb-4 flex items-center space-x-2">
+                    <i data-lucide="edit-3" class="w-5 h-5 text-blue-600"></i>
+                    <span>Form Update Harga Database Real-Time</span>
+                </h2>
+
+                <form @submit.prevent="submitPriceUpdate()" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="sm:col-span-2 lg:col-span-1">
+                        <label class="block text-xs font-medium text-slate-700 mb-1">Pilih Item Code / Barang</label>
+                        <select x-model="updateForm.itemCode" @change="onSelectUpdateItem()" class="w-full text-sm border-slate-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border" required>
+                            <option value="">-- Pilih Kode Barang --</option>
+                            <template x-for="item in items" :key="item.itemCode">
+                                <option :value="item.itemCode" x-text="item.itemCode + ' - ' + item.itemName"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-700 mb-1">Pilih MOQ Qty</label>
+                        <select x-model="updateForm.moq" class="w-full text-sm border-slate-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border" required>
+                            <option value="">-- Pilih MOQ --</option>
+                            <template x-for="tier in moqTiers" :key="tier">
+                                <option :value="tier" x-text="tier"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-700 mb-1">Harga Baru (Rp)</label>
+                        <input type="number" step="any" x-model.number="updateForm.newPrice" placeholder="Misal: 1500" class="w-full text-sm border-slate-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 p-2.5 border" required />
+                    </div>
+
+                    <div class="sm:col-span-2 lg:col-span-2">
+                        <label class="block text-xs font-medium text-slate-700 mb-1">Alasan Perubahan (Untuk Dokumen Proposal)</label>
+                        <input type="text" x-model="updateForm.note" placeholder="Contoh: Penyesuaian Fluktuasi Kertas Dus" class="w-full text-xs border-slate-300 rounded-lg p-2.5 border" />
+                    </div>
+
+                    <div class="flex items-end">
+                        <button type="submit" :disabled="isSaving" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg transition-colors shadow-sm flex items-center justify-center space-x-2 disabled:opacity-50">
+                            <i data-lucide="send" class="w-4 h-4"></i>
+                            <span x-text="isSaving ? 'Menyimpan...' : 'Update & Sync Database'"></span>
+                        </button>
+                    </div>
+
+                    <!-- Auto-filled Readonly Info -->
+                    <div class="sm:col-span-3 bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs flex justify-between items-center">
+                        <div>
+                            <span class="font-semibold text-slate-600">Customer:</span> 
+                            <span class="text-slate-900 font-medium" x-text="selectedItemInfo ? (selectedItemInfo.customerCode + ' - ' + selectedItemInfo.customerName) : '-'"></span>
+                        </div>
+                        <div>
+                            <span class="font-semibold text-slate-600">Harga Saat Ini:</span> 
+                            <span class="text-blue-700 font-bold ml-1" x-text="getCurrentPriceDisplay()"></span>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Bulk Upload Excel -->
+            <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm flex flex-col justify-between">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-900 mb-2 flex items-center space-x-2">
+                        <i data-lucide="file-spreadsheet" class="w-5 h-5 text-emerald-600"></i>
+                        <span>Import Excel Master (Sync Database)</span>
+                    </h2>
+                    <p class="text-xs text-slate-500 mb-4">Unggah file Excel master data harga untuk menyinkronkan seluruh item ke Database Cloud secara bersamaan.</p>
+                </div>
+
+                <div class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-50" @click="$refs.excelInput.click()">
+                    <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto text-slate-400 mb-2"></i>
+                    <p class="text-xs font-semibold text-slate-700">Klik untuk upload file Excel (.xlsx / .csv)</p>
+                    <p class="text-[10px] text-slate-400 mt-1">Otomatis sync data master ke seluruh pengguna</p>
+                    <input type="file" x-ref="excelInput" class="hidden" accept=".xlsx, .xls, .csv" @change="handleExcelUpload($event)">
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Data Table -->
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div>
+                    <h3 class="font-bold text-slate-900 text-base">Matriks Master Data Harga Per MOQ (Database View)</h3>
+                    <p class="text-xs text-slate-500">Klik '+ Proposal' untuk menambahkan item ke draf proposal cetak</p>
+                </div>
+                <div class="flex items-center space-x-3 w-full sm:w-auto">
+                    <input type="text" x-model="searchQuery" placeholder="Cari Kode Item, Nama, Customer..." class="text-xs border border-slate-300 rounded-lg px-3 py-2 w-full sm:w-64 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+            </div>
+
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead class="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 sticky top-0">
+                        <tr>
+                            <th class="p-3 border-r border-slate-200 min-w-[120px]">Aksi / Proposal</th>
+                            <th class="p-3 border-r border-slate-200 min-w-[110px]">Item Code</th>
+                            <th class="p-3 border-r border-slate-200 min-w-[200px]">Item Description</th>
+                            <th class="p-3 border-r border-slate-200 min-w-[100px]">Customer</th>
+                            <th class="p-3 border-r border-slate-200 min-w-[180px]">Customer Name</th>
+                            <template x-for="tier in moqTiers" :key="tier">
+                                <th class="p-2 border-r border-slate-200 text-center min-w-[70px]" x-text="tier"></th>
+                            </template>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        <template x-for="item in filteredItems" :key="item.itemCode">
+                            <tr class="hover:bg-blue-50/40 transition-colors">
+                                <td class="p-2 border-r border-slate-200 text-center">
+                                    <button @click="addToProposalCart(item)" 
+                                            :class="isInProposalCart(item.itemCode) ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-slate-100 text-slate-700 hover:bg-indigo-50 hover:text-indigo-600'"
+                                            class="px-2 py-1 rounded border text-[11px] font-semibold transition flex items-center justify-center space-x-1 mx-auto">
+                                        <i data-lucide="file-text" class="w-3.5 h-3.5"></i>
+                                        <span x-text="isInProposalCart(item.itemCode) ? 'Tersimpan' : '+ Proposal'"></span>
+                                    </button>
+                                </td>
+                                <td class="p-3 font-mono font-semibold text-slate-900 border-r border-slate-200" x-text="item.itemCode"></td>
+                                <td class="p-3 font-medium text-slate-800 border-r border-slate-200" x-text="item.itemName"></td>
+                                <td class="p-3 font-mono text-slate-600 border-r border-slate-200" x-text="item.customerCode"></td>
+                                <td class="p-3 text-slate-700 border-r border-slate-200" x-text="item.customerName"></td>
+                                <template x-for="tier in moqTiers" :key="tier">
+                                    <td class="p-2 text-center border-r border-slate-200 font-mono" :class="item.moqPrices[tier] > 0 ? 'text-slate-900 font-medium bg-emerald-50/30' : 'text-slate-300'">
+                                        <span x-text="item.moqPrices[tier] > 0 ? formatNumber(item.moqPrices[tier]) : '-'"></span>
+                                    </td>
+                                </template>
+                            </tr>
+                        </template>
+                        <template x-if="items.length === 0">
+                            <tr>
+                                <td colspan="22" class="p-8 text-center text-slate-400 italic">
+                                    Mengambil data dari cloud database real-time...
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Historical Update Audit Log -->
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
+                <div>
+                    <h3 class="font-bold text-slate-900 text-base flex items-center space-x-2">
+                        <i data-lucide="history" class="w-4 h-4 text-amber-600"></i>
+                        <span>Riwayat Log Update Real-Time (Audit Trail Terpusat)</span>
+                    </h3>
+                    <p class="text-xs text-slate-500">Tercatat terpusat di cloud setiap kali pengguna melakukan penambahan atau perubahan harga</p>
+                </div>
+                <button @click="exportHistoryLog()" class="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center space-x-1">
+                    <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                    <span>Ekspor Log (.xlsx)</span>
+                </button>
+            </div>
+
+            <div class="overflow-x-auto custom-scrollbar max-h-72">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead class="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 sticky top-0">
+                        <tr>
+                            <th class="p-3 border-r border-slate-200">Waktu Update</th>
+                            <th class="p-3 border-r border-slate-200">User / Pengubah</th>
+                            <th class="p-3 border-r border-slate-200">Item Code</th>
+                            <th class="p-3 border-r border-slate-200">Item Description</th>
+                            <th class="p-3 border-r border-slate-200">Customer Name</th>
+                            <th class="p-3 border-r border-slate-200 text-center">MOQ Tier</th>
+                            <th class="p-3 border-r border-slate-200 text-right">Harga Lama</th>
+                            <th class="p-3 border-r border-slate-200 text-right">Harga Baru</th>
+                            <th class="p-3 text-right">Selisih</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        <template x-for="(log, idx) in historyLogs" :key="idx">
+                            <tr class="hover:bg-slate-50">
+                                <td class="p-3 text-slate-500 border-r border-slate-200 whitespace-nowrap" x-text="log.timestamp"></td>
+                                <td class="p-3 text-slate-600 font-mono text-[10px] border-r border-slate-200" x-text="log.updatedBy ? log.updatedBy.substring(0, 8) + '...' : 'System'"></td>
+                                <td class="p-3 font-mono font-semibold text-slate-900 border-r border-slate-200" x-text="log.itemCode"></td>
+                                <td class="p-3 text-slate-800 border-r border-slate-200" x-text="log.itemName"></td>
+                                <td class="p-3 text-slate-700 border-r border-slate-200" x-text="log.customerName"></td>
+                                <td class="p-3 text-center border-r border-slate-200 font-semibold text-blue-600" x-text="log.moq"></td>
+                                <td class="p-3 text-right border-r border-slate-200 font-mono" x-text="formatNumber(log.oldPrice)"></td>
+                                <td class="p-3 text-right border-r border-slate-200 font-mono font-bold text-emerald-600" x-text="formatNumber(log.newPrice)"></td>
+                                <td class="p-3 text-right font-mono font-semibold" :class="log.diff >= 0 ? 'text-emerald-600' : 'text-rose-600'" x-text="(log.diff >= 0 ? '+' : '') + formatNumber(log.diff)"></td>
+                            </tr>
+                        </template>
+                        <template x-if="historyLogs.length === 0">
+                            <tr>
+                                <td colspan="9" class="p-6 text-center text-slate-400 italic">Belum ada riwayat update harga terdaftar.</td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- MODAL PENGATURAN FIREBASE CLOUD CUSTOM -->
+    <div x-show="openCloudConfigModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 no-print">
+        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 relative" @click.away="openCloudConfigModal = false">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
+                    <i data-lucide="database" class="w-5 h-5 text-indigo-600"></i>
+                    <span>Pengaturan Cloud Database (Google Firebase)</span>
+                </h3>
+                <button @click="openCloudConfigModal = false" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <p class="text-xs text-slate-600">Aplikasi ini tersambung ke **Google Firebase Cloud Firestore**. Masukkan konfigurasi JSON Firebase milik Anda sendiri agar data tersimpan penuh di akun Cloud proyek pribadi/perusahaan Anda:</p>
+
+            <form @submit.prevent="saveCustomFirebaseConfig()" class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Firebase Config JSON Object</label>
+                    <textarea x-model="customFirebaseInput" rows="6" placeholder='{\n  "apiKey": "AIzaSy...",\n  "authDomain": "proyek-anda.firebaseapp.com",\n  "projectId": "proyek-anda",\n  "storageBucket": "proyek-anda.appspot.com",\n  "messagingSenderId": "123456789",\n  "appId": "1:123456789:web:abcdef"\n}' class="w-full text-xs font-mono border border-slate-300 rounded-lg p-2.5 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50"></textarea>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-800 space-y-1">
+                    <p class="font-bold">Cara mendapatkan kunci Firebase gratis:</p>
+                    <ol class="list-decimal list-inside space-y-0.5">
+                        <li>Buka console.firebase.google.com & buat Proyek Baru.</li>
+                        <li>Tambahkan Web App & aktifkan <strong>Firestore Database</strong>.</li>
+                        <li>Salin `firebaseConfig` JSON ke dalam kotak di atas lalu simpan.</li>
+                    </ol>
+                </div>
+
+                <div class="flex justify-end space-x-2 pt-2 border-t">
+                    <button type="button" @click="resetToDefaultFirebase()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg">Gunakan Demo Cloud</button>
+                    <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm">Simpan & Connect Cloud</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- DOKUMEN PROPOSAL MODAL (PREVIEW & PRINT ENGINE) -->
+    <div x-show="openProposalModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 overflow-y-auto">
+        <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full p-4 sm:p-8 space-y-6 max-h-[95vh] overflow-y-auto custom-scrollbar relative" @click.away="openProposalModal = false" id="printableProposalModal">
+            
+            <!-- Modal Action Controls (No Print) -->
+            <div class="flex flex-wrap justify-between items-center border-b pb-4 gap-2 no-print">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="file-check" class="w-6 h-6 text-indigo-600"></i>
+                    <h3 class="text-base font-bold text-slate-900">Pratinjau Dokumen Proposal Permohonan Harga</h3>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button @click="downloadProposalPDF()" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg transition shadow flex items-center space-x-1">
+                        <i data-lucide="file-type-2" class="w-4 h-4"></i>
+                        <span>Download PDF Resmi</span>
+                    </button>
+                    <button @click="window.print()" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition shadow flex items-center space-x-1">
+                        <i data-lucide="printer" class="w-4 h-4"></i>
+                        <span>Cetak</span>
+                    </button>
+                    <button @click="openProposalModal = false" class="p-1.5 text-slate-400 hover:text-slate-600">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- PROPOSAL DOCUMENT HEADER BOX -->
+            <div class="border-2 border-slate-900 rounded-none overflow-hidden font-sans">
+                <div class="grid grid-cols-12 divide-y md:divide-y-0 md:divide-x-2 divide-slate-900 items-center">
+                    
+                    <!-- Left: 3D Isometric "b" Ribbon Logo -->
+                    <div class="col-span-12 md:col-span-3 p-3 flex items-center justify-center bg-white min-h-[70px]">
+                        <div class="flex items-center space-x-2">
+                            <!-- SVG Vector Logo -->
+                            <svg class="w-10 h-11" viewBox="0 0 100 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <g id="BAK-Logo-b">
+                                    <path d="M 12,110 L 38,95 L 38,10 L 12,25 Z" fill="#B71C1C"/>
+                                    <path d="M 38,40 L 64,25 L 90,40 L 64,55 Z" fill="#D32F2F"/>
+                                    <path d="M 64,55 L 90,40 L 90,95 L 64,110 Z" fill="#E53935"/>
+                                    <path d="M 12,110 L 38,95 L 64,110 L 38,125 Z" fill="#C62828"/>
+                                </g>
+                            </svg>
+                            <div class="text-left font-sans">
+                                <div class="font-black text-slate-900 text-sm tracking-wider leading-none">BERKAT ASIA</div>
+                                <div class="font-normal text-slate-800 text-[10px] tracking-[0.25em] leading-tight mt-0.5">KEMASINDO</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Center: Proposal Title -->
+                    <div class="col-span-12 md:col-span-6 p-3 text-center bg-white flex items-center justify-center min-h-[70px]">
+                        <h2 class="text-xs sm:text-sm font-black text-slate-900 tracking-wide uppercase">
+                            PROPOSAL PERMOHONAN PERSETUJUAN HARGA PRODUK
+                        </h2>
+                    </div>
+
+                    <!-- Right: Dept & Date -->
+                    <div class="col-span-12 md:col-span-3 p-3 text-xs text-slate-900 space-y-1 bg-white font-medium min-h-[70px] flex flex-col justify-center">
+                        <div class="flex justify-between">
+                            <span>Dept</span>
+                            <span class="font-bold">: Sales</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Tanggal</span>
+                            <span class="font-bold" x-text="': ' + getFormattedToday()"></span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- FORMAL OPENING SENTENCE -->
+            <div class="text-xs text-slate-900 space-y-2 pt-2">
+                <p class="font-medium">Dengan Hormat,</p>
+                <p>Sehubungan dengan adanya beberapa Update Harga dari Customer, kami ajukan harga produk dengan informasi sebagai berikut :</p>
+            </div>
+
+            <!-- PROPOSAL ITEM MATRIX TABLE -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left border-2 border-slate-900 border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-900 font-bold border-b-2 border-slate-900">
+                            <th class="p-2 border-r-2 border-slate-900 min-w-[100px]">Kode Produk</th>
+                            <th class="p-2 border-r-2 border-slate-900 min-w-[150px]">Customer</th>
+                            <th class="p-2 border-r-2 border-slate-900 min-w-[200px]">Nama Produk</th>
+                            <th class="p-2 border-r-2 border-slate-900 text-center w-20">MOQ</th>
+                            <th class="p-2 border-r-2 border-slate-900 text-right w-28">Harga</th>
+                            <th class="p-2 text-center w-10 no-print">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y-2 divide-slate-900">
+                        <template x-for="group in groupedProposalCart" :key="group.itemCode">
+                            <template x-for="(tier, idx) in group.tiers" :key="tier.moq">
+                                <tr class="hover:bg-slate-50">
+                                    <template x-if="idx === 0">
+                                        <td :rowspan="group.tiers.length" class="p-2 border-r-2 border-slate-900 font-mono font-bold align-top bg-white" x-text="group.itemCode"></td>
+                                    </template>
+                                    <template x-if="idx === 0">
+                                        <td :rowspan="group.tiers.length" class="p-2 border-r-2 border-slate-900 align-top bg-white" x-text="group.customerName"></td>
+                                    </template>
+                                    <template x-if="idx === 0">
+                                        <td :rowspan="group.tiers.length" class="p-2 border-r-2 border-slate-900 font-medium align-top bg-white" x-text="group.itemName"></td>
+                                    </template>
+
+                                    <!-- MOQ Tier Sub-Row -->
+                                    <td class="p-2 border-r-2 border-slate-900 text-center font-bold text-slate-900" x-text="tier.moq"></td>
+                                    <td class="p-2 border-r-2 border-slate-900 text-right font-mono font-bold text-slate-900" x-text="formatNumber(tier.newPrice)"></td>
+                                    <td class="p-1 text-center no-print">
+                                        <button @click="removeTierFromProposal(group.itemCode, tier.moq)" class="text-rose-500 hover:text-rose-700 p-1" title="Hapus dari proposal">
+                                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </template>
+
+                        <template x-if="proposalCart.length === 0">
+                            <tr>
+                                <td colspan="6" class="p-8 text-center text-slate-400 italic">
+                                    Belum ada item barang yang dipilih ke dalam proposal. Silakan lakukan update harga di dashboard.
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- FORMAL CLOSING SENTENCE -->
+            <div class="text-xs text-slate-900 space-y-1 pt-1">
+                <p>Mohon persetujuan harga tersebut untuk kami proses lebih lanjut.</p>
+                <p>Demikian dan terima kasih.</p>
+            </div>
+
+            <!-- AUTHORIZATION & SIGNATURE SECTION -->
+            <div class="pt-6 border-t border-slate-200">
+                <div class="grid grid-cols-3 gap-4 text-center text-xs text-slate-900 font-medium">
+                    <div class="space-y-12">
+                        <p>Dibuat Oleh,</p>
+                        <div class="pt-8 border-t border-slate-900 max-w-[140px] mx-auto font-bold">Admin Sales</div>
+                    </div>
+                    <div class="space-y-12">
+                        <p>Ditinjau Oleh,</p>
+                        <div class="pt-8 border-t border-slate-900 max-w-[140px] mx-auto font-bold">Mgr Sales</div>
+                    </div>
+                    <div class="space-y-12">
+                        <p>Disetujui Oleh,</p>
+                        <div class="pt-8 border-t border-slate-900 max-w-[140px] mx-auto font-bold">CEO</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Bottom Toolbar -->
+            <div class="pt-4 border-t border-slate-200 flex justify-between items-center no-print">
+                <button @click="clearProposalCart()" class="text-xs text-rose-600 hover:text-rose-800 font-semibold flex items-center space-x-1">
+                    <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+                    <span>Kosongkan Proposal (Selesai Print)</span>
+                </button>
+                <button @click="openProposalModal = false" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold rounded-lg">
+                    Tutup
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Modal Tambah Item Baru -->
+    <div x-show="openAddModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 no-print">
+        <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar" @click.away="openAddModal = false">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
+                    <i data-lucide="plus-circle" class="w-5 h-5 text-emerald-600"></i>
+                    <span>Tambah Master Item Barang Baru</span>
+                </h3>
+                <button @click="openAddModal = false" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <form @submit.prevent="submitNewItem()" class="space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Item Code / Kode Barang</label>
+                        <input type="text" x-model="newItemForm.itemCode" placeholder="Misal: NEW1010001" class="w-full text-xs border border-slate-300 rounded-lg p-2.5 focus:ring-emerald-500 focus:border-emerald-500" required />
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Item Description / Nama Barang</label>
+                        <input type="text" x-model="newItemForm.itemName" placeholder="Misal: Dus Box Exclusive 100g" class="w-full text-xs border border-slate-300 rounded-lg p-2.5 focus:ring-emerald-500 focus:border-emerald-500" required />
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Customer Code</label>
+                        <input type="text" x-model="newItemForm.customerCode" placeholder="Misal: CMF00099" class="w-full text-xs border border-slate-300 rounded-lg p-2.5 focus:ring-emerald-500 focus:border-emerald-500" required />
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Customer Name</label>
+                        <input type="text" x-model="newItemForm.customerName" placeholder="Misal: PT Nusantara Kosmetika" class="w-full text-xs border border-slate-300 rounded-lg p-2.5 focus:ring-emerald-500 focus:border-emerald-500" required />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-2">Harga Awal MOQ (Opsional)</label>
+                    <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                        <template x-for="tier in moqTiers" :key="tier">
+                            <div>
+                                <span class="text-[10px] text-slate-500 block text-center font-bold" x-text="tier"></span>
+                                <input type="number" step="any" x-model.number="newItemForm.moqPrices[tier]" placeholder="0" class="w-full text-xs text-center border border-slate-300 rounded p-1" />
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="flex justify-end space-x-2 pt-3 border-t">
+                    <button type="button" @click="openAddModal = false" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg">Batal</button>
+                    <button type="submit" :disabled="isSaving" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50">Simpan Item Baru</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Firebase Real-Time Synchronization Script -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Environment Firebase Config & App ID
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'rekon-harga-bak-default';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "AIzaSyDummyKeyForLocalDemoOnly",
+            authDomain: "demo-rekon.firebaseapp.com",
+            projectId: "demo-rekon",
+            storageBucket: "demo-rekon.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:demo"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        window.firebaseDb = db;
+        window.firebaseAppId = appId;
+        window.firebaseAuth = auth;
+
+        // Authenticate User First
+        async function authenticateUser() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (e) {
+                console.warn("Firebase Auth fallback to anonymous:", e);
+                await signInAnonymously(auth);
+            }
+        }
+
+        authenticateUser();
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                window.dispatchEvent(new CustomEvent('firebase-auth-ready', { detail: user }));
+            }
+        });
+    </script>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        function dashboardApp() {
+            return {
+                moqTiers: ['3K', '5K', '10K', '13K', '15K', '20K', '25K', '30K', '50K', '60K', '75K', '100K', '120K', '140K', '150K', '200K', '250K'],
+                items: [],
+                historyLogs: [],
+                proposalCart: [],
+                searchQuery: '',
+                openAddModal: false,
+                openProposalModal: false,
+                openCloudConfigModal: false,
+                isSaving: false,
+                syncStatus: 'Connecting Database...',
+                currentUserId: 'User-' + Math.floor(Math.random() * 8999 + 1000),
+                customFirebaseInput: '',
+
+                updateForm: {
+                    itemCode: '',
+                    moq: '',
+                    newPrice: null,
+                    note: ''
+                },
+                selectedItemInfo: null,
+
+                newItemForm: {
+                    itemCode: '',
+                    itemName: '',
+                    customerCode: '',
+                    customerName: '',
+                    moqPrices: {}
+                },
+
+                initApp() {
+                    const savedConfig = localStorage.getItem('custom_firebase_config');
+                    if (savedConfig) {
+                        this.customFirebaseInput = savedConfig;
+                    }
+
+                    window.addEventListener('firebase-auth-ready', (e) => {
+                        this.currentUserId = e.detail.uid || this.currentUserId;
+                        this.setupRealtimeListeners();
+                    });
+
+                    // Fallback local storage state
+                    const savedItems = localStorage.getItem('rekon_master_items_v2');
+                    const savedLogs = localStorage.getItem('rekon_history_logs_v2');
+                    const savedProposal = localStorage.getItem('rekon_proposal_cart_v2');
+
+                    if (savedItems) this.items = JSON.parse(savedItems);
+                    else {
+                        this.items = [
+                            { itemCode: 'PAB1010004', itemName: 'Dus Nubiko Toothpaste Chocolate Burst', customerCode: 'CMF00010', customerName: 'PT. Punya Anak Bahagia', moqPrices: { '10K': 1440, '15K': 1110, '20K': 1030, '30K': 880 } },
+                            { itemCode: 'HDI1020002', itemName: 'Inner Box Huge Glass Ionomer Cement Lufill HS', customerCode: 'CMF00012', customerName: 'PT. Huge Dental Indonesia', moqPrices: { '3K': 3340, '5K': 2490, '10K': 1860 } },
+                            { itemCode: 'FBI1010009', itemName: 'Dus Metamotto Alcohol Swab', customerCode: 'CMF00018', customerName: 'PT. Feroze Bangun Indonesia', moqPrices: { '30K': 445 } },
+                            { itemCode: 'CCP1010004', itemName: 'Dus Chocomory Crispy Brownie Almond', customerCode: 'CMF00022', customerName: 'PT. Chocomory Cokelat Persada', moqPrices: { '50K': 3350 } },
+                            { itemCode: 'SAO1010011', itemName: 'Dus PHE Beaute Intensive Lip Hydration Pink Rose #03', customerCode: 'CMF00030', customerName: 'PT. Sinar Alfa Omega', moqPrices: { '10K': 1210 } }
+                        ];
+                    }
+
+                    if (savedLogs) this.historyLogs = JSON.parse(savedLogs);
+                    if (savedProposal) this.proposalCart = JSON.parse(savedProposal);
+
+                    this.sanitizeItems();
+                    this.$nextTick(() => { lucide.createIcons(); });
+                },
+
+                saveCustomFirebaseConfig() {
+                    try {
+                        const parsed = JSON.parse(this.customFirebaseInput);
+                        if (!parsed.apiKey || !parsed.projectId) {
+                            alert("Format JSON Firebase tidak lengkap. Pastikan memiliki apiKey dan projectId.");
+                            return;
+                        }
+                        localStorage.setItem('custom_firebase_config', JSON.stringify(parsed));
+                        alert("Konfigurasi Firebase Cloud pribadi berhasil disimpan! Halaman akan dimuat ulang untuk terhubung.");
+                        window.location.reload();
+                    } catch (e) {
+                        alert("JSON Config tidak valid. Mohon periksa kembali format JSON Anda.");
+                    }
+                },
+
+                resetToDefaultFirebase() {
+                    localStorage.removeItem('custom_firebase_config');
+                    alert("Kembali menggunakan Cloud Database Proyek default. Halaman akan dimuat ulang.");
+                    window.location.reload();
+                },
+
+                setupRealtimeListeners() {
+                    const db = window.firebaseDb;
+                    const appId = window.firebaseAppId;
+                    if (!db || !appId) return;
+
+                    import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((module) => {
+                        const masterDocRef = module.doc(db, 'artifacts', appId, 'public', 'data', 'masterData', 'main');
+                        
+                        module.onSnapshot(masterDocRef, (docSnap) => {
+                            if (docSnap.exists()) {
+                                const cloudData = docSnap.data();
+                                if (cloudData.items) {
+                                    this.items = cloudData.items;
+                                    this.sanitizeItems();
+                                }
+                                if (cloudData.historyLogs) {
+                                    this.historyLogs = cloudData.historyLogs;
+                                }
+                                this.syncStatus = 'Connected Live';
+                                this.saveToLocalStorage();
+                            } else {
+                                this.pushToCloudStorage();
+                            }
+                        }, (err) => {
+                            console.warn("Firestore error, fallback to local storage mode:", err);
+                            this.syncStatus = 'Offline Local';
+                        });
+                    });
+                },
+
+                async pushToCloudStorage() {
+                    const db = window.firebaseDb;
+                    const appId = window.firebaseAppId;
+                    if (!db || !appId) return;
+
+                    this.isSaving = true;
+                    try {
+                        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        const masterDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'masterData', 'main');
+                        await setDoc(masterDocRef, {
+                            items: this.items,
+                            historyLogs: this.historyLogs,
+                            lastUpdated: new Date().toISOString(),
+                            updatedBy: this.currentUserId
+                        });
+                        this.syncStatus = 'Synced Live';
+                    } catch (err) {
+                        console.error("Cloud push failed:", err);
+                    } finally {
+                        this.isSaving = false;
+                    }
+                },
+
+                sanitizeItems() {
+                    this.items.forEach(item => {
+                        if (!item.moqPrices) item.moqPrices = {};
+                        this.moqTiers.forEach(t => {
+                            if (!item.moqPrices[t]) item.moqPrices[t] = 0;
+                        });
+                    });
+                },
+
+                saveToLocalStorage() {
+                    localStorage.setItem('rekon_master_items_v2', JSON.stringify(this.items));
+                    localStorage.setItem('rekon_history_logs_v2', JSON.stringify(this.historyLogs));
+                    localStorage.setItem('rekon_proposal_cart_v2', JSON.stringify(this.proposalCart));
+                },
+
+                copyShareLink() {
+                    const url = window.location.href;
+                    const dummy = document.createElement('input');
+                    document.body.appendChild(dummy);
+                    dummy.value = url;
+                    dummy.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(dummy);
+                    alert("Link dashboard kolaborasi database berhasil disalin ke clipboard!");
+                },
+
+                get filteredItems() {
+                    if (!this.searchQuery.trim()) return this.items;
+                    const q = this.searchQuery.toLowerCase();
+                    return this.items.filter(i => 
+                        i.itemCode.toLowerCase().includes(q) ||
+                        i.itemName.toLowerCase().includes(q) ||
+                        i.customerCode.toLowerCase().includes(q) ||
+                        i.customerName.toLowerCase().includes(q)
+                    );
+                },
+
+                get groupedProposalCart() {
+                    const groups = {};
+                    this.proposalCart.forEach(p => {
+                        if (!groups[p.itemCode]) {
+                            groups[p.itemCode] = {
+                                itemCode: p.itemCode,
+                                itemName: p.itemName,
+                                customerCode: p.customerCode,
+                                customerName: p.customerName,
+                                tiers: []
+                            };
+                        }
+                        groups[p.itemCode].tiers.push({
+                            moq: p.moq,
+                            oldPrice: p.oldPrice,
+                            newPrice: p.newPrice,
+                            diff: p.diff,
+                            note: p.note
+                        });
+                    });
+                    return Object.values(groups);
+                },
+
+                getFormattedToday() {
+                    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+                    const d = new Date();
+                    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+                },
+
+                onSelectUpdateItem() {
+                    this.selectedItemInfo = this.items.find(i => i.itemCode === this.updateForm.itemCode) || null;
+                },
+
+                getCurrentPriceDisplay() {
+                    if (!this.selectedItemInfo || !this.updateForm.moq) return '-';
+                    const price = this.selectedItemInfo.moqPrices[this.updateForm.moq] || 0;
+                    return price > 0 ? 'Rp ' + this.formatNumber(price) : 'Belum Ada (0)';
+                },
+
+                isInProposalCart(itemCode) {
+                    return this.proposalCart.some(p => p.itemCode === itemCode);
+                },
+
+                addToProposalCart(item) {
+                    const activeTiers = this.moqTiers.filter(t => item.moqPrices[t] > 0);
+                    if (activeTiers.length === 0) {
+                        alert("Item ini belum memiliki harga MOQ aktif.");
+                        return;
+                    }
+
+                    activeTiers.forEach(tier => {
+                        const exists = this.proposalCart.some(p => p.itemCode === item.itemCode && p.moq === tier);
+                        if (!exists) {
+                            this.proposalCart.push({
+                                itemCode: item.itemCode,
+                                itemName: item.itemName,
+                                customerCode: item.customerCode,
+                                customerName: item.customerName,
+                                moq: tier,
+                                oldPrice: item.moqPrices[tier],
+                                newPrice: item.moqPrices[tier],
+                                diff: 0,
+                                note: 'Master Price'
+                            });
+                        }
+                    });
+
+                    this.saveToLocalStorage();
+                    this.openProposalModal = true;
+                },
+
+                removeTierFromProposal(itemCode, moq) {
+                    this.proposalCart = this.proposalCart.filter(p => !(p.itemCode === itemCode && p.moq === moq));
+                    this.saveToLocalStorage();
+                },
+
+                clearProposalCart() {
+                    if (confirm("Kosongkan keranjang proposal? Data master database tetap tersimpan.")) {
+                        this.proposalCart = [];
+                        this.saveToLocalStorage();
+                    }
+                },
+
+                async submitPriceUpdate() {
+                    const item = this.items.find(i => i.itemCode === this.updateForm.itemCode);
+                    if (!item) return;
+
+                    const oldPrice = item.moqPrices[this.updateForm.moq] || 0;
+                    const newPrice = Number(this.updateForm.newPrice);
+                    const diff = newPrice - oldPrice;
+
+                    // Update Master Item locally & push to cloud
+                    item.moqPrices[this.updateForm.moq] = newPrice;
+
+                    // Push to Audit Log
+                    const now = new Date();
+                    this.historyLogs.unshift({
+                        timestamp: now.toLocaleString('id-ID'),
+                        updatedBy: this.currentUserId,
+                        itemCode: item.itemCode,
+                        itemName: item.itemName,
+                        customerCode: item.customerCode,
+                        customerName: item.customerName,
+                        moq: this.updateForm.moq,
+                        oldPrice: oldPrice,
+                        newPrice: newPrice,
+                        diff: diff
+                    });
+
+                    // Update or Add to Proposal Cart
+                    const cartIdx = this.proposalCart.findIndex(p => p.itemCode === item.itemCode && p.moq === this.updateForm.moq);
+                    if (cartIdx >= 0) {
+                        this.proposalCart[cartIdx].newPrice = newPrice;
+                        this.proposalCart[cartIdx].diff = diff;
+                        this.proposalCart[cartIdx].note = this.updateForm.note;
+                    } else {
+                        this.proposalCart.push({
+                            itemCode: item.itemCode,
+                            itemName: item.itemName,
+                            customerCode: item.customerCode,
+                            customerName: item.customerName,
+                            moq: this.updateForm.moq,
+                            oldPrice: oldPrice,
+                            newPrice: newPrice,
+                            diff: diff,
+                            note: this.updateForm.note || 'Adjustment'
+                        });
+                    }
+
+                    this.saveToLocalStorage();
+                    await this.pushToCloudStorage();
+
+                    this.updateForm.newPrice = null;
+                    this.updateForm.note = '';
+                    this.openProposalModal = true;
+                    this.$nextTick(() => { lucide.createIcons(); });
+                },
+
+                async submitNewItem() {
+                    const newItem = {
+                        itemCode: this.newItemForm.itemCode,
+                        itemName: this.newItemForm.itemName,
+                        customerCode: this.newItemForm.customerCode,
+                        customerName: this.newItemForm.customerName,
+                        moqPrices: {}
+                    };
+
+                    this.moqTiers.forEach(t => {
+                        newItem.moqPrices[t] = Number(this.newItemForm.moqPrices[t]) || 0;
+                    });
+
+                    this.items.unshift(newItem);
+                    this.saveToLocalStorage();
+                    await this.pushToCloudStorage();
+
+                    this.openAddModal = false;
+                    this.newItemForm = { itemCode: '', itemName: '', customerCode: '', customerName: '', moqPrices: {} };
+                    this.$nextTick(() => { lucide.createIcons(); });
+                },
+
+                handleExcelUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const json = XLSX.utils.sheet_to_json(sheet);
+
+                        if (json.length > 0) {
+                            const newItems = json.map(row => {
+                                const moqPrices = {};
+                                this.moqTiers.forEach(t => {
+                                    moqPrices[t] = Number(row[t] || row[t.toLowerCase()] || 0);
+                                });
+                                return {
+                                    itemCode: String(row['Item No.'] || row['Item Code'] || row['Kode Produk'] || ''),
+                                    itemName: String(row['Item Description'] || row['Item Name'] || row['Nama Produk'] || ''),
+                                    customerCode: String(row['Customer'] || row['Customer Code'] || ''),
+                                    customerName: String(row['Customer Name'] || row['CustomerName'] || ''),
+                                    moqPrices: moqPrices
+                                };
+                            }).filter(i => i.itemCode);
+
+                            if (newItems.length > 0) {
+                                this.items = newItems;
+                                this.saveToLocalStorage();
+                                await this.pushToCloudStorage();
+                                alert(`Berhasil mengimpor dan menyinkronkan ${newItems.length} item dari Excel ke seluruh pengguna di Database Cloud!`);
+                            }
+                        }
+                    };
+                    reader.readAsArrayBuffer(file);
+                },
+
+                exportMasterExcel() {
+                    const exportData = this.items.map(item => {
+                        const row = {
+                            'Item No.': item.itemCode,
+                            'Item Description': item.itemName,
+                            'Customer': item.customerCode,
+                            'Customer Name': item.customerName
+                        };
+                        this.moqTiers.forEach(t => {
+                            row[t] = item.moqPrices[t] || 0;
+                        });
+                        return row;
+                    });
+
+                    const ws = XLSX.utils.json_to_sheet(exportData);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "Master Data Harga");
+                    XLSX.writeFile(wb, "Master_Data_Harga_Terbaru.xlsx");
+                },
+
+                exportHistoryLog() {
+                    if (this.historyLogs.length === 0) {
+                        alert("Belum ada log perubahan untuk diekspor.");
+                        return;
+                    }
+                    const ws = XLSX.utils.json_to_sheet(this.historyLogs);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "History Log");
+                    XLSX.writeFile(wb, "Log_Riwayat_Update_Harga.xlsx");
+                },
+
+                // DIRECT JSPDF GENERATION ENGINE
+                downloadProposalPDF() {
+                    if (this.proposalCart.length === 0) {
+                        alert("Keranjang proposal masih kosong.");
+                        return;
+                    }
+
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({
+                        orientation: 'portrait',
+                        unit: 'mm',
+                        format: 'a4'
+                    });
+
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const startX = 14;
+                    const startY = 12;
+                    const headerWidth = pageWidth - 28;
+                    const headerHeight = 22;
+
+                    // 1. HEADER OUTER BORDER BOX
+                    doc.setLineWidth(0.6);
+                    doc.setDrawColor(15, 23, 42); // slate-900
+                    doc.rect(startX, startY, headerWidth, headerHeight);
+
+                    // Vertical Dividers inside Header Box
+                    const col1Width = 50;
+                    const col3Width = 45;
+                    const col2Width = headerWidth - col1Width - col3Width;
+
+                    doc.line(startX + col1Width, startY, startX + col1Width, startY + headerHeight);
+                    doc.line(startX + col1Width + col2Width, startY, startX + col1Width + col2Width, startY + headerHeight);
+
+                    // 1a. DRAW PRECISE ISOMETRIC "b" RIBBON LOGO
+                    const logoX = startX + 4;
+                    const logoY = startY + 3;
+
+                    // Vertical Left Spine (#B71C1C)
+                    doc.setFillColor(183, 28, 28);
+                    doc.lines([[4, -2], [0, -10], [-4, 2]], logoX + 2, logoY + 14, [1, 1], 'F', true);
+
+                    // Top Diamond Face (#D32F2F)
+                    doc.setFillColor(211, 47, 47);
+                    doc.lines([[4, -2], [4, 2], [-4, 2]], logoX + 6, logoY + 6, [1, 1], 'F', true);
+
+                    // Right Vertical Face (#E53935)
+                    doc.setFillColor(229, 57, 53);
+                    doc.lines([[4, -2], [0, 8], [-4, 2]], logoX + 10, logoY + 8, [1, 1], 'F', true);
+
+                    // Bottom Ribbon Extension (#C62828)
+                    doc.setFillColor(198, 40, 40);
+                    doc.lines([[4, -2], [4, 2], [-4, 2]], logoX + 2, logoY + 14, [1, 1], 'F', true);
+
+                    // Header Text - Company Name
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(15, 23, 42);
+                    doc.text('BERKAT ASIA', logoX + 16, startY + 9);
+                    
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(6.5);
+                    doc.text('K E M A S I N D O', logoX + 16, startY + 13);
+
+                    // Header Text - Center Title
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8);
+                    const titleText = 'PROPOSAL PERMOHONAN PERSETUJUAN HARGA PRODUK';
+                    const titleX = startX + col1Width + (col2Width / 2);
+                    doc.text(titleText, titleX, startY + 12, { align: 'center', maxWidth: col2Width - 4 });
+
+                    // Header Text - Right Dept & Date
+                    const rightX = startX + col1Width + col2Width + 4;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7.5);
+                    doc.text('Dept', rightX, startY + 9);
+                    doc.text(': Sales', rightX + 16, startY + 9);
+                    doc.text('Tanggal', rightX, startY + 15);
+                    doc.text(': ' + this.getFormattedToday(), rightX + 16, startY + 15);
+
+                    // 2. FORMAL OPENING SENTENCES
+                    let currentY = startY + headerHeight + 8;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8.5);
+                    doc.text('Dengan Hormat,', startX, currentY);
+                    
+                    currentY += 5;
+                    doc.text('Sehubungan dengan adanya beberapa Update Harga dari Customer, kami ajukan harga produk dengan informasi sebagai berikut :', startX, currentY);
+
+                    // 3. PREPARE AUTO-TABLE BODY DATA WITH ROWSPAN MERGING
+                    const tableRows = [];
+                    const grouped = this.groupedProposalCart;
+
+                    grouped.forEach(group => {
+                        group.tiers.forEach((tier, idx) => {
+                            if (idx === 0) {
+                                tableRows.push([
+                                    { content: group.itemCode, rowspan: group.tiers.length, styles: { fontStyle: 'bold', valign: 'top' } },
+                                    { content: group.customerName, rowspan: group.tiers.length, styles: { valign: 'top' } },
+                                    { content: group.itemName, rowspan: group.tiers.length, styles: { fontStyle: 'bold', valign: 'top' } },
+                                    { content: tier.moq, styles: { halign: 'center', fontStyle: 'bold' } },
+                                    { content: this.formatNumber(tier.newPrice), styles: { halign: 'right', fontStyle: 'bold' } }
+                                ]);
+                            } else {
+                                tableRows.push([
+                                    { content: tier.moq, styles: { halign: 'center', fontStyle: 'bold' } },
+                                    { content: this.formatNumber(tier.newPrice), styles: { halign: 'right', fontStyle: 'bold' } }
+                                ]);
+                            }
+                        });
+                    });
+
+                    // 4. GENERATE HIGH-PRECISION AUTOTABLE
+                    currentY += 4;
+                    doc.autoTable({
+                        startY: currentY,
+                        head: [['Kode Produk', 'Customer', 'Nama Produk', 'MOQ', 'Harga']],
+                        body: tableRows,
+                        theme: 'grid',
+                        headStyles: {
+                            fillColor: [241, 245, 249],
+                            textColor: [15, 23, 42],
+                            fontStyle: 'bold',
+                            lineWidth: 0.4,
+                            lineColor: [15, 23, 42],
+                            halign: 'left',
+                            fontSize: 8
+                        },
+                        bodyStyles: {
+                            textColor: [15, 23, 42],
+                            lineWidth: 0.3,
+                            lineColor: [15, 23, 42],
+                            fontSize: 8,
+                            cellPadding: 2.5
+                        },
+                        columnStyles: {
+                            0: { cellWidth: 28 },
+                            1: { cellWidth: 48 },
+                            2: { cellWidth: 'auto' },
+                            3: { cellWidth: 18, halign: 'center' },
+                            4: { cellWidth: 24, halign: 'right' }
+                        },
+                        margin: { left: startX, right: startX }
+                    });
+
+                    // 5. FORMAL CLOSING SENTENCES
+                    let finalY = doc.lastAutoTable.finalY + 8;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8.5);
+                    doc.text('Mohon persetujuan harga tersebut untuk kami proses lebih lanjut.', startX, finalY);
+                    doc.text('Demikian dan terima kasih.', startX, finalY + 5);
+
+                    // 6. SIGNATURE GRID AT BOTTOM
+                    finalY += 18;
+
+                    if (finalY > doc.internal.pageSize.getHeight() - 35) {
+                        doc.addPage();
+                        finalY = 25;
+                    }
+
+                    const colWidth = (headerWidth) / 3;
+
+                    // Labels
+                    doc.setFontSize(8.5);
+                    doc.text('Dibuat Oleh,', startX + (colWidth / 2), finalY, { align: 'center' });
+                    doc.text('Ditinjau Oleh,', startX + colWidth + (colWidth / 2), finalY, { align: 'center' });
+                    doc.text('Disetujui Oleh,', startX + (colWidth * 2) + (colWidth / 2), finalY, { align: 'center' });
+
+                    // Underlined Signatory Titles
+                    finalY += 16;
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('Admin Sales', startX + (colWidth / 2), finalY, { align: 'center' });
+                    doc.text('Mgr Sales', startX + colWidth + (colWidth / 2), finalY, { align: 'center' });
+                    doc.text('CEO', startX + (colWidth * 2) + (colWidth / 2), finalY, { align: 'center' });
+
+                    // Save PDF File
+                    doc.save(`Proposal_Harga_BAK_${this.getFormattedToday().replace(/\s+/g, '_')}.pdf`);
+                },
+
+                formatNumber(val) {
+                    if (val === null || val === undefined) return '0';
+                    return new Intl.NumberFormat('id-ID').format(val);
+                }
+            };
+        }
+    </script>
+</body>
+</html>
